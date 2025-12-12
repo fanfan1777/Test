@@ -4,8 +4,9 @@ import cv2
 import numpy as np
 
 try:
-    from skimage.feature import phase_congruency
+    from phasepack import phasecong
 except ImportError:  # pragma: no cover - skimage is an optional dependency.
+    print("phasepack not found, falling back to Laplacian for phase congruency.")
     phase_congruency = None
 
 
@@ -19,29 +20,78 @@ def _normalize(channel: np.ndarray) -> np.ndarray:
     return np.clip(channel, 0.0, 1.0)
 
 
-def _compute_sasad(gray: np.ndarray) -> np.ndarray:
-    """Approximate the SASAD descriptor via contrast enhancement + gradients."""
-    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
-    enhanced = clahe.apply(gray)
-    grad_x = cv2.Scharr(enhanced, cv2.CV_32F, 1, 0)
-    grad_y = cv2.Scharr(enhanced, cv2.CV_32F, 0, 1)
-    gradient = cv2.magnitude(grad_x, grad_y)
-    gradient = _normalize(gradient)
+# def _compute_sasad(gray: np.ndarray) -> np.ndarray:
+#     """Approximate the SASAD descriptor via contrast enhancement + gradients."""
+#     clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+#     enhanced = clahe.apply(gray)
+#     grad_x = cv2.Scharr(enhanced, cv2.CV_32F, 1, 0)
+#     grad_y = cv2.Scharr(enhanced, cv2.CV_32F, 0, 1)
+#     gradient = cv2.magnitude(grad_x, grad_y)
+#     gradient = _normalize(gradient)
 
-    shadow = cv2.GaussianBlur(enhanced, (0, 0), sigmaX=7)
-    shadow = _normalize(shadow)
+#     shadow = cv2.GaussianBlur(enhanced, (0, 0), sigmaX=7)
+#     shadow = _normalize(shadow)
 
-    descriptor = 0.65 * gradient + 0.35 * (1.0 - shadow)
-    return np.clip(descriptor, 0.0, 1.0)
+#     descriptor = 0.65 * gradient + 0.35 * (1.0 - shadow)
+#     return np.clip(descriptor, 0.0, 1.0)
+
+def _compute_sasad(gray: np.ndarray, num_iter: int = 15, delta_t: float = 0.14, q0_factor: float = 1.0) -> np.ndarray:
+    """
+    Real implementation of SASAD (Speckle Reducing Anisotropic Diffusion).
+    Solves the PDE: dI/dt = div( c(q) * grad(I) )
+    """
+    # 1. 初始类型转换 (float32, 0-1)
+    img = gray.astype(np.float32) / 255.0 if gray.dtype == np.uint8 else gray.astype(np.float32)
+    
+    # 避免除零错误的小常数
+    eps = 1e-10
+
+    for t in range(num_iter):
+        # 2. 计算四个方向的梯度 (北, 南, 西, 东)
+        # N: (x, y-1) - (x, y)
+        dN = np.roll(img, -1, axis=0) - img
+        dS = np.roll(img, 1, axis=0) - img
+        dE = np.roll(img, -1, axis=1) - img
+        dW = np.roll(img, 1, axis=1) - img
+
+        # 3. 计算瞬时变异系数 q(x, y)
+        # 梯度模长近似
+        grad_mag = np.sqrt(dN**2 + dS**2 + dE**2 + dW**2 + eps)
+        # 局部均值 (简单的平滑作为基准)
+        local_mean = cv2.GaussianBlur(img, (5, 5), 1.0) + eps
+        
+        # q = |Grad| / Mean
+        q = grad_mag / local_mean
+        
+        # 4. 估计散斑基准值 q0 (取图像中相对平滑区域的q值)
+        # 简单的策略：取q的中位数或分位数作为基准噪声水平
+        q0 = np.median(q) * q0_factor
+        
+        if q0 == 0: q0 = eps
+
+        # 5. 计算扩散系数 c(q)
+        # 公式: c(q) = 1 / (1 + (q^2 - q0^2) / (q0^2 * (1 + q0^2)))
+        # 下面的实现使用了简化的 SRAD 扩散函数形式，效果更稳定
+        denom = (q**2 - q0**2) / (q0**2 * (1 + q0**2) + eps)
+        c = 1.0 / (1.0 + np.maximum(denom, 0)) # 保证 denom >= 0
+
+        # 6. 更新图像 (PDE 离散化更新)
+        # div = cN*dN + cS*dS + cE*dE + cW*dW
+        # 注意：系数 c 应该是对应方向的。这里简化使用中心点 c，或者计算半点 c。
+        # 为保持高效，通常使用中心 c 近似
+        img += delta_t * (c * dN + c * dS + c * dE + c * dW)
+
+    return _normalize(img)
 
 
 def _compute_phase_congruency(gray: np.ndarray) -> np.ndarray:
     """Generate a phase congruency response map using skimage when available."""
     gray_norm = gray.astype(np.float32) / 255.0
-    if phase_congruency is not None:
-        pc, *_ = phase_congruency(gray_norm)
+    if phasecong is not None:
+        pc, *_ = phasecong(gray_norm)
         pc = np.nan_to_num(pc, nan=0.0, posinf=0.0, neginf=0.0)
     else:  # Fallback to Laplacian energy if skimage is missing.
+        print("phasepack not found, falling back to Laplacian for phase congruency.")
         pc = np.abs(cv2.Laplacian(gray_norm, cv2.CV_32F, ksize=3))
     return _normalize(pc)
 

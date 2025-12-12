@@ -2,8 +2,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
-from scipy.ndimage.morphology import distance_transform_edt
-from scipy.ndimage.filters import convolve
+from scipy.ndimage import distance_transform_edt
+from scipy.ndimage import convolve
 
 def Object(pred, gt):
     x = np.mean(pred[gt == 1])
@@ -183,12 +183,14 @@ def jac_score(y_true, y_pred):
     union = y_true.sum() + y_pred.sum() - intersection
     return (intersection + 1e-15) / (union + 1e-15)
 
-def mae(y_true, y_pred):
-    sum=0
-    for i in range(len(y_true)):
-        sum+=abs(y_true[i]-y_pred[i])
-    return sum/len(y_true)
+# def mae(y_true, y_pred):
+#     sum=0
+#     for i in range(len(y_true)):
+#         sum+=abs(y_true[i]-y_pred[i])
+#     return sum/len(y_true)
 
+def mae(y_true, y_pred):
+    return np.mean(np.abs(y_true - y_pred))
 
 def accuracy(y_true, y_pred):
     return np.mean(y_true == y_pred)

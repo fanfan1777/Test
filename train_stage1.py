@@ -2,8 +2,6 @@ import os
 import random
 import time
 import datetime
-
-import cv2
 import numpy as np
 import albumentations as A
 import torch
@@ -27,21 +25,21 @@ def my_seeding(seed):
 
 if __name__ == "__main__":
 
-    dataset_name= 'TN3K'
+    dataset_name = 'TN3K'
 
     val_name=None
 
-    seed=42
+    seed = 0
 
     my_seeding(seed)
 
     image_size = 256
     size = (image_size, image_size)
     batch_size = 8
-    num_epochs = 100
+    num_epochs = 300
     lr = 1e-4
     early_stopping_patience = 100
-    val_ratio = 0.2
+    val_split = 0.1
 
     resume_path = None
 
@@ -69,31 +67,33 @@ if __name__ == "__main__":
     hyperparameters_str = f"Image Size: {image_size}\nBatch Size: {batch_size}\nLR: {lr}\nEpochs: {num_epochs}\n"
     hyperparameters_str += f"Early Stopping Patience: {early_stopping_patience}\n"
     hyperparameters_str += f"Seed: {seed}\n"
+    hyperparameters_str += f"Validation Split: {val_split}\n"
     print_and_save(train_log_path, hyperparameters_str)
 
     """ Data augmentation: Transforms """
 
     transform = A.Compose([
-        A.Rotate(limit=15,border_mode=cv2.BORDER_CONSTANT,p=0.5),
+        A.Rotate(limit=15, p=0.5),
         A.HorizontalFlip(p=0.5),
-        A.ElasticTransform(alpha=120,sigma=120 * 0.05,alpha_affine=120* 0.03,p=0.5),
-        A.MultiplicativeNoise(multiplier=(0.85, 1.15), elementwise=True, p=0.3)
+        # A.CoarseDropout(p=0.3, max_holes=5, max_height=8, max_width=8)
+        A.ElasticTransform(alpha=50, sigma=120 * 0.04, alpha_affine=20, p=0.5),
+        A.MultiplicativeNoise(multiplier=(0.85, 1.15), elementwise=True, p=0.3),
     ])
 
     """ Dataset """
     (train_x, train_y), (valid_x, valid_y) = load_data(
         data_path,
         val_name,
-        val_ratio=val_ratio,
-        split_seed=seed
+        val_split=val_split,
+        seed=seed
     )
     train_x, train_y = shuffling(train_x, train_y)
     data_str = f"Dataset Size:\nTrain: {len(train_x)} - Valid: {len(valid_x)}\n"
     print_and_save(train_log_path, data_str)
 
     """ Dataset and loader """
-    train_dataset = DATASET(train_x,  train_y, (image_size, image_size), transform=transform, dual_input=True)
-    valid_dataset = DATASET(valid_x,  valid_y, (image_size, image_size), transform=None, dual_input=False)
+    train_dataset = DATASET(train_x,  train_y, (image_size, image_size), transform=transform)
+    valid_dataset = DATASET(valid_x,  valid_y, (image_size, image_size), transform=None)
 
     train_loader = DataLoader(
         dataset=train_dataset,

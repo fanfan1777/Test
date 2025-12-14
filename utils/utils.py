@@ -7,42 +7,6 @@ from skimage.measure import label, regionprops, find_contours
 from sklearn.utils import shuffle
 from utils.metrics import precision, recall, F2, dice_score, jac_score  # Fix missing package import when running as module.
 from sklearn.metrics import accuracy_score
-import cv2
-import numpy as np
-
-
-def resize_keep_aspect_ratio(image, target_size, value=0):
-    """
-    等比例缩放并填充黑边
-    :param image: 输入图像 (H, W) 或 (H, W, C)
-    :param target_size: 目标尺寸 tuple (H, W)，例如 (256, 256)
-    :param value: 填充颜色，默认黑色 0
-    :return: 调整后的图像
-    """
-    h, w = image.shape[:2]
-    target_h, target_w = target_size
-
-    # 计算缩放比例，取最小比例以保证能完全放入
-    scale = min(target_w / w, target_h / h)
-
-    # 计算新的宽和高
-    new_w = int(w * scale)
-    new_h = int(h * scale)
-
-    # 进行等比例缩放
-    resized = cv2.resize(image, (new_w, new_h), interpolation=cv2.INTER_LINEAR)
-
-    # 创建目标画布
-    if len(image.shape) == 3:  # 彩色图/三通道图
-        new_image = np.full((target_h, target_w, image.shape[2]), value, dtype=image.dtype)
-        # 将缩放后的图贴到画布中心 (或者是左上角，看习惯)
-        # 这里演示贴到左上角，计算方便；也可以贴中间
-        new_image[:new_h, :new_w, :] = resized
-    else:  # 灰度图/Mask
-        new_image = np.full((target_h, target_w), value, dtype=image.dtype)
-        new_image[:new_h, :new_w] = resized
-
-    return new_image
 
 """ Seeding the randomness. """
 def seeding(seed):

@@ -29,7 +29,7 @@ def my_seeding(seed):
 if __name__ == "__main__":
 
     # dataset
-    dataset_name = 'Glas'
+    dataset_name = 'TN3K'
     val_name = None
 
     seed = 0
@@ -43,7 +43,7 @@ if __name__ == "__main__":
     lr = 1e-4
     lr_backbone = 1e-4
     early_stopping_patience = 100
-    val_ratio = 0.1
+    val_split = 0.1
 
     pretrained_backbone = None
 
@@ -74,6 +74,7 @@ if __name__ == "__main__":
     hyperparameters_str = f"Image Size: {image_size}\nBatch Size: {batch_size}\nLR: {lr}\nEpochs: {num_epochs}\n"
     hyperparameters_str += f"Early Stopping Patience: {early_stopping_patience}\n"
     hyperparameters_str += f"Seed: {seed}\n"
+    hyperparameters_str += f"Validation Split: {val_split}\n"
     print_and_save(train_log_path, hyperparameters_str)
 
     """ Data augmentation: Transforms """
@@ -88,16 +89,16 @@ if __name__ == "__main__":
     (train_x, train_y), (valid_x, valid_y) = load_data(
         data_path,
         val_name,
-        val_ratio=val_ratio,
-        split_seed=seed
+        val_split=val_split,
+        seed=seed
     )
     train_x, train_y = shuffling(train_x, train_y)
     data_str = f"Dataset Size:\nTrain: {len(train_x)} - Valid: {len(valid_x)}\n"
     print_and_save(train_log_path, data_str)
 
     """ Dataset and loader """
-    train_dataset = DATASET(train_x, train_y, (image_size, image_size), transform=transform, dual_input=True)
-    valid_dataset = DATASET(valid_x, valid_y, (image_size, image_size), transform=None, dual_input=False)
+    train_dataset = DATASET(train_x, train_y, (image_size, image_size), transform=transform)
+    valid_dataset = DATASET(valid_x, valid_y, (image_size, image_size), transform=None)
 
     train_loader = DataLoader(
         dataset=train_dataset,

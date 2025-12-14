@@ -9,8 +9,7 @@ import torch
 from network.model import ConDSeg
 from utils.utils import create_dir, seeding
 from utils.utils import calculate_metrics
-from utils.data_io import load_data, load_split
-from utils.preprocessing import build_triplet_tensor
+from utils.run_engine import load_data
 
 
 def process_mask(y_pred):
@@ -58,13 +57,15 @@ def evaluate(model, save_path, test_x, test_y, size):
 
         """ Image """
         image = cv2.imread(x, cv2.IMREAD_COLOR)
-        # Align inference preprocessing with training: convert BGR to RGB before feature extraction.
+        # Align inference preprocessing with training: convert BGR to RGB before normalization.
         image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
         image = cv2.resize(image, size)
-        features = build_triplet_tensor(image)
-        features = np.expand_dims(features, axis=0)
-        features = features.astype(np.float32)
-        image = torch.from_numpy(features)
+        save_img = image
+        image = np.transpose(image, (2, 0, 1))
+        image = image / 255.0
+        image = np.expand_dims(image, axis=0)
+        image = image.astype(np.float32)
+        image = torch.from_numpy(image)
         image = image.to(device)
 
         """ Mask """
@@ -107,6 +108,7 @@ if __name__ == "__main__":
     """ Seeding """
 
     dataset_name = 'TN3K'
+    val_split = 0.1
 
     seeding(42)
     size = (256, 256)
@@ -120,12 +122,12 @@ if __name__ == "__main__":
 
     """ Test dataset """
     path = "../data/{}/".format(dataset_name)
-    try:
-        test_x, test_y = load_split(path, split="test")
-        print(f"Loaded explicit test split from {dataset_name} directory structure.")
-    except FileNotFoundError:
-        (_, _), (test_x, test_y) = load_data(path)
-        print(f"Test split manifest not found. Falling back to validation set for {dataset_name}.")
+    (train_x, train_y), (test_x, test_y) = load_data(
+        path,
+        val_split=val_split,
+        seed=42,
+        use_test_split=True
+    )
 
     save_path = f"results/{dataset_name}/MyModel"
 

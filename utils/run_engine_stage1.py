@@ -3,12 +3,11 @@ import numpy as np
 import cv2
 import torch
 import torch.nn as nn
+from glob import glob
 from torch.utils.data import Dataset
+from torchvision import transforms
 
 from utils.utils import calculate_metrics  # Fix module import path for stage1 engine.
-from utils.preprocessing import build_triplet_tensor, degrade_triplet
-from utils.data_io import load_data
-import utils
 from tqdm import tqdm
 
 #
@@ -17,41 +16,168 @@ torch.backends.cudnn.deterministic = False
 # import os
 # os.environ['CUDA_LAUNCH_BLOCKING'] = "1"
 import torch.nn.functional as F
-def resize_keep_aspect_ratio(image, target_size, value=0):
-    """
-    等比例缩放并填充黑边
-    :param image: 输入图像 (H, W) 或 (H, W, C)
-    :param target_size: 目标尺寸 tuple (H, W)，例如 (256, 256)
-    :param value: 填充颜色，默认黑色 0
-    :return: 调整后的图像
-    """
-    h, w = image.shape[:2]
+
+
+_SUPPORTED_EXTENSIONS = (
+    ".jpg", ".JPG", ".jpeg", ".JPEG",
+    ".png", ".PNG", ".bmp", ".BMP",
+    ".tif", ".tiff", ".TIF", ".TIFF",
+)
+
+
+def _resolve_file(path, folder, name):
+    """Resolve file names saved without extensions inside txt protocol splits."""
+    base = os.path.join(path, folder, name)
+    for ext in _SUPPORTED_EXTENSIONS:
+        candidate = base + ext
+        if os.path.exists(candidate):
+            return candidate
+    raise FileNotFoundError(f"Could not find {name} with supported extensions under {folder}")
+
+
+def _gather_files(folder):
+    files = []
+    for ext in _SUPPORTED_EXTENSIONS:
+        files.extend(sorted(glob(os.path.join(folder, f"*{ext}"))))
+    return files
+
+
+def _collect_pairs_from_dirs(image_dir, mask_dir):
+    if not (os.path.isdir(image_dir) and os.path.isdir(mask_dir)):
+        return None
+
+    image_files = _gather_files(image_dir)
+    mask_files = _gather_files(mask_dir)
+    if len(image_files) == 0:
+        raise FileNotFoundError(f"No images found inside {image_dir}")
+
+    mask_lookup = {os.path.splitext(os.path.basename(m))[0]: m for m in mask_files}
+    images, masks = [], []
+    missing = []
+    for img in image_files:
+        stem = os.path.splitext(os.path.basename(img))[0]
+        mask_path = mask_lookup.get(stem)
+        if mask_path is None:
+            missing.append(stem)
+            continue
+        images.append(img)
+        masks.append(mask_path)
+
+    if missing:
+        raise FileNotFoundError(
+            f"Missing masks for {len(missing)} samples under {mask_dir}. Examples: {missing[:5]}"
+        )
+
+    return images, masks
+
+
+def _split_pairs(images, masks, val_split, seed):
+    if len(images) != len(masks):
+        raise ValueError("Image/mask counts do not match")
+    if len(images) < 2:
+        raise ValueError("Need at least two samples to create a validation split")
+    if not 0 < val_split < 1:
+        raise ValueError("val_split must be between 0 and 1")
+
+    rng = np.random.default_rng(seed)
+    indices = np.arange(len(images))
+    rng.shuffle(indices)
+
+    val_count = max(1, int(len(indices) * val_split))
+    if val_count >= len(indices):
+        val_count = len(indices) - 1
+
+    val_idx = indices[:val_count]
+    train_idx = indices[val_count:]
+
+    def _take(idxs):
+        return [images[i] for i in idxs], [masks[i] for i in idxs]
+
+    return _take(train_idx), _take(val_idx)
+
+
+def _load_from_directory_structure(path, val_split, seed, use_test_split):
+    train_image_dir = os.path.join(path, "trainval-image")
+    train_mask_dir = os.path.join(path, "trainval-mask")
+
+    if not (os.path.isdir(train_image_dir) and os.path.isdir(train_mask_dir)):
+        return None
+
+    train_images, train_masks = _collect_pairs_from_dirs(train_image_dir, train_mask_dir)
+
+    if use_test_split:
+        test_image_dir = os.path.join(path, "test-image")
+        test_mask_dir = os.path.join(path, "test-mask")
+        if os.path.isdir(test_image_dir) and os.path.isdir(test_mask_dir):
+            test_pairs = _collect_pairs_from_dirs(test_image_dir, test_mask_dir)
+            return (train_images, train_masks), test_pairs
+
+    (train_split, val_split_pairs) = _split_pairs(train_images, train_masks, val_split, seed)
+    return train_split, val_split_pairs
+
+
+def load_names(path, file_path):
+    f = open(file_path, "r")
+    data = f.read().split("\n")[:-1]
+    images = [_resolve_file(path, "images", name) for name in data]
+    masks = [_resolve_file(path, "masks", name) for name in data]
+    return images, masks
+
+
+def load_data(path, val_name=None, val_split=0.1, seed=42, use_test_split=False):
+    train_names_path = f"{path}/train.txt"
+    if os.path.exists(train_names_path):
+        if use_test_split and os.path.exists(f"{path}/test.txt"):
+            test_names_path = f"{path}/test.txt"
+            train_x, train_y = load_names(path, train_names_path)
+            test_x, test_y = load_names(path, test_names_path)
+            return (train_x, train_y), (test_x, test_y)
+
+        if val_name is None:
+            valid_names_path = f"{path}/val.txt"
+        else:
+            valid_names_path = f"{path}/val_{val_name}.txt"
+
+        train_x, train_y = load_names(path, train_names_path)
+        valid_x, valid_y = load_names(path, valid_names_path)
+        return (train_x, train_y), (valid_x, valid_y)
+
+    folder_split = _load_from_directory_structure(path, val_split, seed, use_test_split)
+    if folder_split is not None:
+        return folder_split
+
+    raise FileNotFoundError(
+        "Unable to locate supported split files or folders. Expected train.txt/val.txt or trainval-image/trainval-mask directories."
+    )
+
+
+def _resize_with_padding(img, target_size, is_mask=False):
+    """Resize while keeping aspect ratio by padding the shorter side (letterbox)."""
     target_h, target_w = target_size
+    h, w = img.shape[:2]
+    if (h, w) == (target_h, target_w):
+        return img
 
-    # 计算缩放比例，取最小比例以保证能完全放入
-    scale = min(target_w / w, target_h / h)
+    scale = min(target_h / h, target_w / w)
+    new_h = max(1, int(round(h * scale)))
+    new_w = max(1, int(round(w * scale)))
+    interp = cv2.INTER_NEAREST if is_mask else cv2.INTER_LINEAR
+    resized = cv2.resize(img, (new_w, new_h), interpolation=interp)
 
-    # 计算新的宽和高
-    new_w = int(w * scale)
-    new_h = int(h * scale)
+    pad_h = target_h - new_h
+    pad_w = target_w - new_w
+    top = pad_h // 2
+    bottom = pad_h - top
+    left = pad_w // 2
+    right = pad_w - left
 
-    # 进行等比例缩放
-    resized = cv2.resize(image, (new_w, new_h), interpolation=cv2.INTER_LINEAR)
+    border_value = 0 if img.ndim == 2 else (0, 0, 0)
+    padded = cv2.copyMakeBorder(resized, top, bottom, left, right, cv2.BORDER_CONSTANT, value=border_value)
+    return padded
 
-    # 创建目标画布
-    if len(image.shape) == 3:  # 彩色图/三通道图
-        new_image = np.full((target_h, target_w, image.shape[2]), value, dtype=image.dtype)
-        # 将缩放后的图贴到画布中心 (或者是左上角，看习惯)
-        # 这里演示贴到左上角，计算方便；也可以贴中间
-        new_image[:new_h, :new_w, :] = resized
-    else:  # 灰度图/Mask
-        new_image = np.full((target_h, target_w), value, dtype=image.dtype)
-        new_image[:new_h, :new_w] = resized
-
-    return new_image
 
 class DATASET(Dataset):
-    def __init__(self, images_path, masks_path, size, transform=None, dual_input=True):
+    def __init__(self, images_path, masks_path, size, transform=None):
         super().__init__()
 
         self.images_path = images_path
@@ -61,7 +187,6 @@ class DATASET(Dataset):
         # print("n_samples:", self.n_samples)
         # self.convert_edge=convert_edge
         self.size = size
-        self.dual_input = dual_input
 
     def __getitem__(self, index):
         """ Reading Image & Mask """
@@ -79,22 +204,22 @@ class DATASET(Dataset):
             mask = augmentations["mask"]
             background = augmentations["background"]
 
-        """ Image -> Advanced triplet tensor """
-        image = resize_keep_aspect_ratio(image, self.size)
-        primary = build_triplet_tensor(image)
-        degraded = degrade_triplet(primary) if self.dual_input else primary.copy()
+        """ Image """
+        image = _resize_with_padding(image, self.size)
+        image = np.transpose(image, (2, 0, 1))
+        image = image / 255.0
 
         """ Mask """
-        mask = resize_keep_aspect_ratio(mask, self.size)
+        mask = _resize_with_padding(mask, self.size, is_mask=True)
         mask = np.expand_dims(mask, axis=0)
         mask = mask / 255.0
 
         """ Background """
-        background = resize_keep_aspect_ratio(background, self.size)
+        background = _resize_with_padding(background, self.size, is_mask=True)
         background = np.expand_dims(background, axis=0)
         background = background / 255.0
 
-        return (primary, degraded), (mask, background)
+        return image, (mask, background)
 
     def __len__(self):
         return self.n_samples
@@ -126,24 +251,34 @@ def train(model, loader, optimizer, loss_fn, device, consistency_loss_fn=BinaryC
     epoch_recall = 0.0
     epoch_precision = 0.0
 
-    for i, ((x_clean, x_degraded), (y1, y2)) in enumerate(tqdm(loader, desc="Training", total=len(loader))):
 
-        x_clean = x_clean.to(device, dtype=torch.float32)
-        x_degraded = x_degraded.to(device, dtype=torch.float32)
+    augmentations = transforms.Compose([
+        transforms.ColorJitter(brightness=0.3, contrast=0.3, saturation=0.3, hue=0.1),
+        transforms.RandomGrayscale(p=0.5),
+        transforms.GaussianBlur(kernel_size=(1, 7), sigma=(0.1, 3))
+    ])
+
+    for i, ((x), (y1, y2)) in enumerate(tqdm(loader, desc="Training", total=len(loader))):
+
+        x = x.to(device, dtype=torch.float32)
         y1 = y1.to(device, dtype=torch.float32)
         y2 = y2.to(device, dtype=torch.float32)
 
         optimizer.zero_grad()
 
-        mask_pred_clean = model(x_clean)
-        mask_pred_degraded = model(x_degraded)
 
-        loss_consistency = consistency_loss_fn(mask_pred_clean, mask_pred_degraded)
+        mask_pred = model(x)
 
-        loss_mask_clean = loss_fn(mask_pred_clean, y1)
-        loss_mask_degraded = loss_fn(mask_pred_degraded, y1)
+        x_aug = augmentations(x)
+        x_aug = x_aug.to(device, dtype=torch.float32)
+        mask_pred_aug = model(x_aug)
 
-        loss = loss_mask_clean + loss_mask_degraded + 0.5 * loss_consistency
+        loss_consistency = consistency_loss_fn(mask_pred, mask_pred_aug)
+
+        loss_mask = loss_fn(mask_pred, y1)
+        loss_mask_aug = loss_fn(mask_pred_aug, y1)
+
+        loss = loss_mask + loss_mask_aug + loss_consistency
 
         loss.backward()
 
@@ -156,7 +291,7 @@ def train(model, loader, optimizer, loss_fn, device, consistency_loss_fn=BinaryC
         batch_recall = []
         batch_precision = []
 
-        for yt, yp in zip(y1, mask_pred_clean):
+        for yt, yp in zip(y1, mask_pred):
             score = calculate_metrics(yt, yp)
             batch_jac.append(score[0])
             batch_f1.append(score[1])
@@ -187,12 +322,12 @@ def evaluate(model, loader, loss_fn, device):
     epoch_precision = 0.0
 
     with torch.no_grad():
-        for i, ((x_clean, _), (y1, y2)) in enumerate(tqdm(loader, desc="Evaluation", total=len(loader))):
-            x_clean = x_clean.to(device, dtype=torch.float32)
+        for i, ((x), (y1, y2)) in enumerate(tqdm(loader, desc="Evaluation", total=len(loader))):
+            x = x.to(device, dtype=torch.float32)
             y1 = y1.to(device, dtype=torch.float32)
             y2 = y2.to(device, dtype=torch.float32)
 
-            mask_pred = model(x_clean)
+            mask_pred = model(x)
 
             loss_mask = loss_fn(mask_pred, y1)
 

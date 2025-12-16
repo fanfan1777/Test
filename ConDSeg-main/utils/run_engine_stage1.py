@@ -399,8 +399,8 @@ def train(model, loader, optimizer, loss_fn, device, consistency_loss_fn=None, c
 
         # 3. 概率转换 (Logits -> Probabilities)
         # 关键: KL散度、FFT一致性和DiceLoss都需要在 [0,1] 概率空间计算
-        prob_pred = torch.sigmoid(mask_pred_logits)
-        prob_pred_aug = torch.sigmoid(mask_pred_aug_logits)
+        prob_pred = mask_pred_logits
+        prob_pred_aug = mask_pred_aug_logits
 
         # 4. 计算一致性损失 (Module 2: Soft Structure Consistency)
         # 使用概率图作为输入

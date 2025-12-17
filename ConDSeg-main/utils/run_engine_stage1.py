@@ -331,20 +331,13 @@ def train(model, loader, optimizer, loss_fn, device, consistency_loss_fn=None, c
         x_aug = x_aug.to(device, dtype=torch.float32)
         prob_pred_aug, sdf_pred_aug = model(x_aug)
         
-        loss_consistency = consistency_loss_fn(prob_pred, prob_pred_aug,weight_map = weight_sdf)
-
-
+        loss_consistency = consistency_loss_fn(prob_pred, prob_pred_aug,weight_map = weight_soft)
         loss_mask = loss_fn(prob_pred, y1)
-
-
         loss_mask_aug = loss_fn(prob_pred_aug, y1)
-
-
-
         loss_sdf_sup = sdf_supervised_loss_fn(sdf_pred, sdf_gt)
 
         #TODO修改 SDF 一致性 Loss (方案A核心)
-        loss_sdf_cons = sdf_consistency_loss_fn(sdf_pred, sdf_pred_aug,weight_map = weight_soft)
+        loss_sdf_cons = sdf_consistency_loss_fn(sdf_pred, sdf_pred_aug,weight_map = weight_sdf)
         # 6. 总损失
         # loss = L_supervised + lambda * L_consistency
         # loss = loss_mask + loss_mask_aug + (consistency_weight * loss_consistency)

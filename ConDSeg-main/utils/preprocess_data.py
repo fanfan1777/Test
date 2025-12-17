@@ -5,9 +5,23 @@ import numpy as np
 import glob
 from tqdm import tqdm
 from multiprocessing import Pool, cpu_count
-from util import compute_sdf
 
-from utils.physics_utils import build_triplet_tensor
+# --- 1. 路径修复：将项目根目录加入环境，防止 ModuleNotFoundError ---
+current_dir = os.path.dirname(os.path.abspath(__file__))
+project_root = os.path.dirname(current_dir)  # 获取 utils 的上一级目录（即项目根目录）
+if project_root not in sys.path:
+    sys.path.append(project_root)
+
+# --- 2. 正确导入模块 ---
+# 因为 utils 已经在 sys.path 中了，可以直接 import util (作为同级) 或者 import utils.util (作为包)
+# 为了通用性，建议这样写：
+try:
+    from utils.util import compute_sdf  # 从 util.py 导入
+    from utils.physics_utils import build_triplet_tensor
+except ImportError:
+    # 如果是在 utils 目录下直接运行，也可以尝试本地导入
+    from util import compute_sdf
+    from physics_utils import build_triplet_tensor
 
 # 配置路径
 DATASET_ROOT = "/workspace/data/TN3K"  # 修改为你的数据集根目录
@@ -105,4 +119,5 @@ def main():
 if __name__ == '__main__':
 
     main()
+
 

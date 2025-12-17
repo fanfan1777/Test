@@ -7,7 +7,7 @@ from glob import glob
 from torch.utils.data import Dataset
 from torchvision import transforms
 import kornia.augmentation as K
-from utils.utils import calculate_metrics,compute_sdf # Fix module import path for stage1 engine.
+from utils.util import calculate_metrics,compute_sdf # Fix module import path for stage1 engine.
 
 from utils.metrics import UltraSoundConsistencyLoss,SDFConsistencyLoss
 from tqdm import tqdm

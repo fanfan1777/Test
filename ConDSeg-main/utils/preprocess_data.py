@@ -11,7 +11,6 @@ try:
 except ImportError:
     print("无法导入build_triplet_tensor")
 
-compute_sdf = utils.compute_sdf
 # 配置路径
 DATASET_ROOT = "/workspace/data/TN3K"  # 修改为你的数据集根目录
 PROCESS_CONFIG = [
@@ -106,4 +105,5 @@ def main():
     print("所有图像和掩码已完成 .npy 转换！")
 
 if __name__ == '__main__':
+
     main()

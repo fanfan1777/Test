@@ -6,10 +6,8 @@ import glob
 from tqdm import tqdm
 from multiprocessing import Pool, cpu_count
 from util import compute_sdf
-try:
-    from physics_utils import build_triplet_tensor
-except ImportError:
-    print("无法导入build_triplet_tensor")
+
+from utils.physics_utils import build_triplet_tensor
 
 # 配置路径
 DATASET_ROOT = "/workspace/data/TN3K"  # 修改为你的数据集根目录
@@ -107,3 +105,4 @@ def main():
 if __name__ == '__main__':
 
     main()
+

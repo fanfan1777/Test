@@ -331,7 +331,7 @@ def train(model, loader, optimizer, loss_fn, device, consistency_loss_fn=None, c
         x_aug = x_aug.to(device, dtype=torch.float32)
         prob_pred_aug, sdf_pred_aug = model(x_aug)
         
-        loss_consistency = consistency_loss_fn(prob_pred, prob_pred_aug,weight_map = weight_soft)
+        loss_consistency = consistency_loss_fn(prob_pred, prob_pred_aug,weight_map = weight_sdf)
 
 
         loss_mask = loss_fn(prob_pred, y1)

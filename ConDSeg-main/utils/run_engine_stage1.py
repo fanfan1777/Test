@@ -363,6 +363,7 @@ def train(model, loader, optimizer, loss_fn, device, consistency_loss_fn=None, c
         loss = loss_mask + loss_mask_aug + (consistency_weight * loss_consistency) +lambda_sdf * (loss_sdf_sup + loss_sdf_cons)
 
         loss.backward()
+        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=5.0)
         optimizer.step()
 
         epoch_loss += loss.item()

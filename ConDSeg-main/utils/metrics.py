@@ -133,6 +133,7 @@ class DiceBCELoss(nn.Module):
         targets = targets.view(-1)
         intersection = (inputs * targets).sum()
         dice_loss = 1 - (2. * intersection + smooth) / (inputs.sum() + targets.sum() + smooth)
+        inputs = torch.clamp(inputs, 1e-7, 1.0 - 1e-7)
         BCE = F.binary_cross_entropy(inputs, targets, reduction='mean')
         Dice_BCE = BCE + dice_loss
         return Dice_BCE
@@ -319,5 +320,6 @@ class SDFConsistencyLoss(nn.Module):
 
         if weight_map is not None:
             loss = loss * weight_map
+
 
         return self.weight * loss.mean()
